@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>College Quiz</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root { --card-bg:#ffffff; --bg:#f0f0f0; --border:#dcdcdc; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: Arial, sans-serif;
+    margin: 0;
+    display: flex;
+    min-height: 100vh;
+    background: var(--bg);
+    transition: background 0.2s ease;
+  }
+
+  /* Left: Quiz area */
+  .quiz-wrap {
+    flex: 3;
+    padding: 20px;
+  }
+  .quiz-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.08);
+    max-width: 900px;
+    margin: 0 auto;
+    transition: transform 0.2s ease;
+  }
+  h1 { margin: 0 0 16px; font-size: 24px; }
+
+  /* Timer row */
+  .toolbar {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+  }
+  .toolbar input[type="number"] {
+    width: 90px; padding: 8px; border: 1px solid var(--border); border-radius: 8px;
+  }
+  .toolbar button {
+    padding: 8px 14px; border: none; border-radius: 8px; cursor: pointer;
+    background: #0b79d0; color: #fff; font-weight: 600;
+  }
+  .toolbar button.secondary { background: #6c757d; }
+
+  /* Question + options */
+  #question { font-size: 20px; margin: 10px 0 12px; }
+  .options { display: grid; gap: 10px; }
+  .option {
+    padding: 12px;
+    background: #f7f7f7;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .option.correct { background: #a5d6a7; border-color: #5aa65f; }
+  .option.wrong   { background: #ef9a9a; border-color: #e06262; }
+
+  /* Controls under options */
+  .controls {
+    display: flex; gap: 10px; align-items: center; margin-top: 14px;
+  }
+  #nextBtn {
+    padding: 10px 16px; font-size: 16px; border-radius: 10px; border: none; cursor: pointer;
+    background: #0b79d0; color: white; font-weight: 600;
+  }
+  #nextBtn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* Timer display */
+  #timerText { font-size: 18px; }
+  .red-timer { color: red; font-weight: 700; }
+  .flash { background: red !important; }
+
+  /* Shake animation for the question card */
+  @keyframes shake {
+    0% { transform: translateX(0); }
+    25% { transform: translateX(-6px); }
+    50% { transform: translateX(6px); }
+    75% { transform: translateX(-6px); }
+    100% { transform: translateX(0); }
+  }
+  .shake { animation: shake 0.3s infinite; }
+
+  /* Right: Scoreboard */
+  .board {
+    flex: 1;
+    background: #fff;
+    border-left: 1px solid var(--border);
+    padding: 20px;
+    position: sticky;
+    top: 0;
+    max-height: 100vh;
+    overflow: auto;
+    min-width: 280px;
+  }
+  .board h2 { margin-top: 0; }
+  .team-row {
+    display: grid;
+    grid-template-columns: 1fr auto auto auto;
+    gap: 8px;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px dashed #e7e7e7;
+  }
+  .team-name {
+    font-weight: 700; cursor: pointer; padding: 4px 6px; border-radius: 6px;
+  }
+  .score {
+    min-width: 40px; text-align: right; font-weight: 700;
+  }
+  .btn {
+    padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border); background: #f5f5f5; cursor: pointer;
+  }
+  .btn:hover { filter: brightness(0.97); }
+
+  .hint { font-size: 12px; color: #666; margin-top: 8px; }
+
+  /* Small helper badge */
+  .badge {
+    display: inline-block; background:#eef6ff; color:#0b79d0; border:1px solid #cfe6ff;
+    border-radius: 999px; padding:4px 10px; font-size:12px; margin-left:8px;
+  }
+</style>
+</head>
+<body>
+
+<!-- LEFT: QUIZ -->
+<div class="quiz-wrap">
+  <div class="quiz-card" id="quizCard">
+    <h1>College Quiz <span class="badge">Live</span></h1>
+
+    <!-- Timer + actions -->
+    <div class="toolbar">
+      <label>Set Timer (sec):
+        <input type="number" id="timerInput" value="30" min="5" />
+      </label>
+      <button id="startBtn" onclick="startQuiz()">Start Quiz</button>
+      <button class="secondary" onclick="restartQuestion()">Restart Question</button>
+      <div id="timerText">Timer: –</div>
+    </div>
+
+    <!-- Question area -->
+    <div id="quizBox" style="display:none;">
+      <div id="question">Loading…</div>
+      <div id="options" class="options"></div>
+
+      <div class="controls">
+        <button id="nextBtn" onclick="confirmNext()" disabled>Next</button>
+      </div>
+      <div class="hint">Select an answer to enable Next. If time runs out, Next will be enabled automatically.</div>
+    </div>
+  </div>
+</div>
+
+<!-- RIGHT: SCOREBOARD -->
+<div class="board">
+  <h2>Scoreboard</h2>
+  <div id="teams"></div>
+  <div class="hint">Tip: click a team name to rename. Use +5 / -5 to adjust quickly.</div>
+</div>
+
+<script>
+/* =========================
+   CONFIG: Your Google Sheet
+   ========================= */
+const SHEET_CSV_URL =
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vRiqqInQm40Eo-MOFDuPOC40etCZdH3Fxnb5ZrZwJk2ziHeIVGOYyQ0xqWKNsL-vw1FxEfYzr7u18fZ/pub?output=csv";
+
+/* ===================================
+   State
+   =================================== */
+let questions = [];           // { q, options[4], answerIndex }
+let currentQuestion = 0;
+let timerId = null;
+let timeLeft = 0;
+let quizStarted = false;
+
+/* Scoreboard: 6 teams by default, editable names, auto-sorted by score */
+let teams = [
+  { name: "Team A", score: 0 },
+  { name: "Team B", score: 0 },
+  { name: "Team C", score: 0 },
+  { name: "Team D", score: 0 },
+  { name: "Team E", score: 0 },
+  { name: "Team F", score: 0 }
+];
+
+/* ===================================
+   CSV parsing (robust to quotes/commas)
+   =================================== */
+function parseCSV(text) {
+  const rows = [];
+  let row = [];
+  let cell = '';
+  let inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (inQuotes) {
+      if (char === '"') {
+        if (text[i+1] === '"') { cell += '"'; i++; } // escaped quote
+        else { inQuotes = false; }
+      } else {
+        cell += char;
+      }
+    } else {
+      if (char === '"') { inQuotes = true; }
+      else if (char === ',') { row.push(cell); cell = ''; }
+      else if (char === '\n') { row.push(cell); rows.push(row); row = []; cell = ''; }
+      else { cell += char; }
+    }
+  }
+  if (cell.length > 0 || row.length > 0) { row.push(cell); rows.push(row); }
+  return rows;
+}
+
+/* ===================================
+   Load questions from Google Sheet CSV
+   =================================== */
+async function loadQuestions() {
+  const res = await fetch(SHEET_CSV_URL);
+  const text = await res.text();
+  const rows = parseCSV(text).filter(r => r.length && r.join('').trim() !== "");
+  if (!rows.length) throw new Error("CSV appears empty.");
+
+  // Expect header row: Question | Option1 | Option2 | Option3 | Option4 | CorrectOptionNumber
+  const header = rows.shift().map(h => h.trim().toLowerCase());
+  const idx = {
+    q: header.indexOf("question"),
+    o1: header.indexOf("option1"),
+    o2: header.indexOf("option2"),
+    o3: header.indexOf("option3"),
+    o4: header.indexOf("option4"),
+    ans: header.indexOf("correctoptionnumber")
+  };
+  if (Object.values(idx).some(v => v === -1)) {
+    throw new Error("Header row missing or misnamed. Expected: Question, Option1..4, CorrectOptionNumber");
+  }
+
+  questions = rows.map(r => {
+    const q = (r[idx.q] || "").trim();
+    const options = [r[idx.o1], r[idx.o2], r[idx.o3], r[idx.o4]].map(x => (x || "").trim());
+    const ansNum = parseInt((r[idx.ans] || "").trim(), 10);
+    const answerIndex = isNaN(ansNum) ? -1 : (ansNum - 1);
+    return { q, options, answerIndex };
+  }).filter(q => q.q && q.options.filter(Boolean).length === 4 && q.answerIndex >= 0 && q.answerIndex < 4);
+}
+
+/* ===================================
+   Quiz flow
+   =================================== */
+async function startQuiz() {
+  if (!quizStarted) {
+    try {
+      await loadQuestions();
+    } catch (e) {
+      alert("Couldn't load questions:\n" + e.message);
+      return;
+    }
+    quizStarted = true;
+  }
+  currentQuestion = 0;
+  document.getElementById("quizBox").style.display = "block";
+  renderTeams();         // show board
+  showQuestion();
+}
+
+function showQuestion() {
+  stopTimerEffects();
+  clearInterval(timerId);
+  const q = questions[currentQuestion];
+  if (!q) { alert("No questions available."); return; }
+
+  document.getElementById("question").textContent = q.q;
+
+  const opts = document.getElementById("options");
+  opts.innerHTML = "";
+  q.options.forEach((opt, i) => {
+    const div = document.createElement("div");
+    div.className = "option";
+    div.textContent = opt;
+    div.onclick = () => selectOption(i);
+    opts.appendChild(div);
+  });
+
+  document.getElementById("nextBtn").disabled = true;
+  // start timer for this question
+  startTimer();
+}
+
+function selectOption(i) {
+  // lock options
+  const optionEls = document.querySelectorAll(".option");
+  optionEls.forEach(el => el.style.pointerEvents = "none");
+
+  const correct = questions[currentQuestion].answerIndex;
+  if (i === correct) {
+    optionEls[i].classList.add("correct");
+  } else {
+    optionEls[i].classList.add("wrong");
+    optionEls[correct].classList.add("correct");
+  }
+  clearInterval(timerId);
+  document.getElementById("nextBtn").disabled = false;
+}
+
+function confirmNext() {
+  if (confirm("Proceed to the next question?")) {
+    nextQuestion();
+  }
+}
+
+function nextQuestion() {
+  currentQuestion++;
+  if (currentQuestion < questions.length) {
+    showQuestion();
+  } else {
+    stopTimerEffects();
+    clearInterval(timerId);
+    alert("Quiz Completed!");
+  }
+}
+
+function restartQuestion() {
+  // Reload the current question and restart the timer
+  showQuestion();
+}
+
+/* ===================================
+   Timer
+   =================================== */
+function startTimer() {
+  timeLeft = parseInt(document.getElementById("timerInput").value, 10) || 30;
+  updateTimerText();
+  clearInterval(timerId);
+
+  timerId = setInterval(() => {
+    timeLeft--;
+    updateTimerText();
+
+    if (timeLeft <= 0) {
+      clearInterval(timerId);
+      stopTimerEffects();
+      // Enable Next when time is up
+      document.getElementById("nextBtn").disabled = false;
+    }
+  }, 1000);
+}
+
+function updateTimerText() {
+  const t = document.getElementById("timerText");
+  t.textContent = `Timer: ${Math.max(timeLeft, 0)}s`;
+
+  // turn red at <=10s
+  if (timeLeft <= 10) t.classList.add("red-timer");
+  else t.classList.remove("red-timer");
+
+  // last 3 seconds: flash red background + shake card
+  const card = document.getElementById("quizCard");
+  if (timeLeft <= 3 && timeLeft > 0) {
+    document.body.classList.add("flash");
+    card.classList.add("shake");
+  } else {
+    document.body.classList.remove("flash");
+    card.classList.remove("shake");
+  }
+}
+
+function stopTimerEffects() {
+  const t = document.getElementById("timerText");
+  t.classList.remove("red-timer");
+  document.body.classList.remove("flash");
+  document.getElementById("quizCard").classList.remove("shake");
+}
+
+/* ===================================
+   Scoreboard
+   =================================== */
+function renderTeams() {
+  // sort by score (desc), but keep stable names
+  const sorted = [...teams].sort((a,b) => b.score - a.score);
+  const container = document.getElementById("teams");
+  container.innerHTML = "";
+  sorted.forEach((team) => {
+    const row = document.createElement("div");
+    row.className = "team-row";
+
+    const name = document.createElement("div");
+    name.className = "team-name";
+    name.textContent = team.name;
+    name.title = "Click to rename";
+    name.onclick = () => {
+      const newName = prompt("Rename team:", team.name);
+      if (newName && newName.trim()) {
+        // rename in original teams array
+        const t = teams.find(x => x.name === team.name && x.score === team.score) || team;
+        t.name = newName.trim();
+        renderTeams();
+      }
+    };
+
+    const score = document.createElement("div");
+    score.className = "score";
+    score.textContent = team.score;
+
+    const plus = document.createElement("button");
+    plus.className = "btn";
+    plus.textContent = "+5";
+    plus.onclick = () => {
+      const t = teams.find(x => x.name === team.name && x.score === team.score) || team;
+      t.score += 5;
+      renderTeams();
+    };
+
+    const minus = document.createElement("button");
+    minus.className = "btn";
+    minus.textContent = "-5";
+    minus.onclick = () => {
+      const t = teams.find(x => x.name === team.name && x.score === team.score) || team;
+      t.score -= 5;
+      renderTeams();
+    };
+
+    row.appendChild(name);
+    row.appendChild(score);
+    row.appendChild(plus);
+    row.appendChild(minus);
+    container.appendChild(row);
+  });
+}
+</script>
+</body>
+</html>
